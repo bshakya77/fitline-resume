@@ -5,7 +5,9 @@ import { JobPanel } from "@/components/job-panel";
 import { MatchPanel } from "@/components/match-panel";
 import { MatchingJobs } from "@/components/matching-jobs";
 import { ResumePanel } from "@/components/resume-panel";
+import { SiteHeader } from "@/components/site-header";
 import { Suggestions } from "@/components/suggestions";
+import { useApplications } from "@/components/use-applications";
 import type { MatchResult } from "@/lib/analyze";
 import type { ParsedResume } from "@/lib/types";
 
@@ -32,6 +34,7 @@ export function FitApp() {
   const [match, setMatch] = useState<MatchResult | null>(null);
   const [scoring, setScoring] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
+  const { applications, setJobStatus } = useApplications();
 
   const ready = Boolean(resume && jobText.trim().length >= 20);
 
@@ -123,19 +126,7 @@ export function FitApp() {
 
   return (
     <div className="min-h-full overflow-x-hidden bg-background text-foreground">
-      <header className="bg-secondary">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-4 sm:px-6">
-          <a href="#top" className="flex items-center gap-2 font-heading text-lg font-semibold">
-            <span className="grid size-9 place-items-center rounded-full bg-primary text-sm text-primary-foreground">F</span>
-            Fitline
-          </a>
-          <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium">
-            <a href="#resume">Resume</a>
-            <a href="#score">Score</a>
-            <a href="#jobs">Jobs</a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader />
       <main id="top">
         <section className="relative overflow-hidden">
           <div aria-hidden className="pointer-events-none absolute -top-16 -left-16 size-56 rounded-full bg-[#efe8ff]" />
@@ -145,7 +136,7 @@ export function FitApp() {
               Score your <span className="text-gradient">resume</span>
             </h1>
             <div className="mt-8">
-              <MatchingJobs resume={resume} />
+              <MatchingJobs resume={resume} applications={applications} onStatus={setJobStatus} />
             </div>
           </div>
         </section>

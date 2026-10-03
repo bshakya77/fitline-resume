@@ -66,9 +66,9 @@ export function portalSearchLinks(query: string): { name: string; href: string }
   const loc = encodeURIComponent("United States");
   return [
     { name: "LinkedIn", href: `https://www.linkedin.com/jobs/search/?keywords=${q}&location=${loc}` },
-    { name: "Remotive", href: `https://remotive.com/remote-jobs/software-dev?search=${q}` },
-    { name: "Remote OK", href: `https://remoteok.com/remote-${query.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-jobs` },
+    { name: "Monster.com", href: `https://www.monster.com/jobs/search?q=${q}&where=${loc}` },
     { name: "Y Combinator", href: `https://www.workatastartup.com/jobs?query=${q}` },
     { name: "HigherEdJobs", href: `https://www.higheredjobs.com/search/advanced_action.cfm?Keyword=${q}` },
+    { name: "SDBOR", href: `https://yourfuture.sdbor.edu/postings/search?query=${q}` },
   ];
 }

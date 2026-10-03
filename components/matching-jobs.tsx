@@ -4,10 +4,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { ApplicationStatus, JobSnapshot, TrackedApplication } from "@/lib/applications";
 import type { ParsedResume } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const PORTALS = ["LinkedIn", "Remotive", "Remote OK", "Y Combinator", "HigherEdJobs"] as const;
+const PORTALS = ["LinkedIn", "Monster.com", "Y Combinator", "HigherEdJobs", "SDBOR"] as const;
 
 type Listing = {
   portal: string;
@@ -20,7 +21,15 @@ type Listing = {
   parts: { keywords: number; domain: number; technologies: number; experience: number } | null;
 };
 
-export function MatchingJobs({ resume }: { resume: ParsedResume | null }) {
+export function MatchingJobs({
+  resume,
+  applications,
+  onStatus,
+}: {
+  resume: ParsedResume | null;
+  applications: TrackedApplication[];
+  onStatus: (job: JobSnapshot, status: ApplicationStatus) => void;
+}) {
   const [keywords, setKeywords] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
@@ -114,7 +123,7 @@ export function MatchingJobs({ resume }: { resume: ParsedResume | null }) {
           <Label htmlFor="job-place" className="sr-only">
             Country
           </Label>
-          <Input id="job-place" value="United States" readOnly className="min-h-11 rounded-xl bg-secondary px-2" />
+          <Input id="job-place" value="United States" readOnly className="min-h-11 rounded-xl bg-secondary px-2 text-center" />
         </div>
         <Button type="submit" className="shrink-0 px-4" disabled={keywords.trim().length < 2 || selected.length === 0}>
           Search
@@ -124,7 +133,7 @@ export function MatchingJobs({ resume }: { resume: ParsedResume | null }) {
         <li className="min-w-0">
           <label
             className={cn(
-              "flex min-h-10 min-w-0 cursor-pointer items-center gap-1.5 rounded-xl border bg-card px-2 py-1.5",
+              "flex min-h-10 min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border bg-card px-2 py-1.5 text-center",
               allSelected ? "border-primary bg-secondary" : "border-border",
             )}
           >
@@ -145,7 +154,7 @@ export function MatchingJobs({ resume }: { resume: ParsedResume | null }) {
             <li key={name} className="min-w-0">
               <label
                 className={cn(
-                  "flex min-h-10 min-w-0 cursor-pointer items-center gap-1.5 rounded-xl border bg-card px-2 py-1.5",
+                  "flex min-h-10 min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border bg-card px-2 py-1.5 text-center",
                   on ? "border-primary bg-secondary" : "border-border",
                 )}
               >
@@ -181,6 +190,7 @@ export function MatchingJobs({ resume }: { resume: ParsedResume | null }) {
           {listings.map((job) => {
             const rowKey = `${job.portal}:${job.url}`;
             const description = job.text?.trim() ?? "";
+            const status = applications.find((item) => item.url === job.url)?.status ?? null;
             return (
             <li key={rowKey} className="rounded-2xl border border-border bg-card p-4">
               <div className="flex items-start justify-between gap-3">
@@ -206,6 +216,24 @@ export function MatchingJobs({ resume }: { resume: ParsedResume | null }) {
                 {[job.organization, job.location, job.portal].filter(Boolean).join(" · ")}
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={status === "saved" ? "default" : "secondary"}
+                  aria-pressed={status === "saved"}
+                  onClick={() => onStatus(job, "saved")}
+                >
+                  {status === "saved" ? "Saved" : "Save"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={status === "applied" ? "default" : "secondary"}
+                  aria-pressed={status === "applied"}
+                  onClick={() => onStatus(job, "applied")}
+                >
+                  Applied
+                </Button>
                 <Button type="button" variant="secondary" size="sm" onClick={() => void copyValue(job.url, rowKey, "link")}>
                   Copy link
                 </Button>

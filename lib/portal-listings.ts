@@ -21,7 +21,7 @@ export type PortalSearchResult = {
   noneQualified: boolean;
 };
 
-const ALLOWED = ["LinkedIn", "Remotive", "Remote OK", "Y Combinator", "HigherEdJobs"] as const;
+const ALLOWED = ["LinkedIn", "Monster.com", "Y Combinator", "HigherEdJobs", "SDBOR"] as const;
 
 type PortalName = (typeof ALLOWED)[number];
 
@@ -126,97 +126,106 @@ function blocked(hostname: string, body: string): boolean {
   return looksLikeBlockedPage(hostname, htmlToText(body));
 }
 
-function queryTokens(query: string): string[] {
-  const skip = new Set(["a", "an", "the", "of", "and", "for", "in", "to", "or"]);
-  return [
-    ...new Set(
-      query
-        .toLowerCase()
-        .split(/[^a-z0-9+#]+/)
-        .filter((token) => token.length >= 2 && !skip.has(token)),
-    ),
-  ];
+function monsterLocation(value: unknown): string {
+  if (!value || typeof value !== "object") return "United States";
+  const place = value as Record<string, unknown>;
+  const address = place.address && typeof place.address === "object" ? (place.address as Record<string, unknown>) : place;
+  const locality = typeof address.addressLocality === "string" ? address.addressLocality.trim() : "";
+  const region = typeof address.addressRegion === "string" ? address.addressRegion.trim() : "";
+  const joined = [locality, region].filter(Boolean).join(", ");
+  return joined || "United States";
 }
 
-function titleMatches(title: string, tokens: string[]): boolean {
-  if (tokens.length === 0) return false;
-  const words = new Set(title.toLowerCase().match(/[a-z0-9+#]+/g) ?? []);
-  return tokens.every((token) => words.has(token));
-}
-
-function usRelevant(location: string, remoteBoard: boolean): boolean {
-  const value = location.replace(/&amp;/g, " ").replace(/\s+/g, " ").trim();
-  if (!value) return remoteBoard;
-  const lower = value.toLowerCase();
-  if (/\b(united states|usa|u\.s\.|northern america|north america|worldwide|world wide|anywhere)\b/.test(lower)) {
-    return true;
+function addMonsterPosting(value: unknown, jobs: RawListing[], seen: Set<string>) {
+  if (jobs.length >= 8 || !value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) addMonsterPosting(item, jobs, seen);
+    return;
   }
-  if (/\bamericas\b/.test(lower) && !/\blatin\b/.test(lower)) return true;
-  if (/\b(san francisco|new york|seattle|austin|boston|chicago|california|texas|remote)\b/.test(lower)) return true;
-  return false;
+  const record = value as Record<string, unknown>;
+  if (record["@graph"]) addMonsterPosting(record["@graph"], jobs, seen);
+  const type = record["@type"];
+  const types = Array.isArray(type) ? type : [type];
+  if (!types.includes("JobPosting")) return;
+  const title = typeof record.title === "string" ? clean(record.title) : "";
+  const rawUrl = typeof record.url === "string" ? record.url : "";
+  const url = rawUrl ? publicUrl(rawUrl.startsWith("http") ? rawUrl : `https://www.monster.com${rawUrl}`) : null;
+  if (!title || !url || seen.has(url)) return;
+  const hiring = record.hiringOrganization;
+  const organization =
+    hiring && typeof hiring === "object" && typeof (hiring as Record<string, unknown>).name === "string"
+      ? clean((hiring as Record<string, unknown>).name as string)
+      : "";
+  const description = typeof record.description === "string" ? clean(record.description) : "";
+  const location = monsterLocation(record.jobLocation);
+  seen.add(url);
+  jobs.push({
+    title,
+    organization: organization || null,
+    location,
+    url,
+    text: [title, organization, location, description].filter(Boolean).join("\n"),
+    body: description,
+  });
 }
 
-async function remotiveJobs(query: string): Promise<RawListing[]> {
-  const tokens = queryTokens(query);
-  const page = await fetchText(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(query)}`);
-  if (!page.ok || blocked("remotive.com", page.body)) return [];
-  let payload: { jobs?: unknown };
-  try {
-    payload = JSON.parse(page.body) as { jobs?: unknown };
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(payload.jobs)) return [];
+async function monsterJobs(query: string): Promise<RawListing[]> {
+  const page = await fetchText(
+    `https://www.monster.com/jobs/search?q=${encodeURIComponent(query)}&where=${encodeURIComponent("United States")}&page=1`,
+  );
+  if (!page.ok || blocked("www.monster.com", page.body)) return [];
   const jobs: RawListing[] = [];
-  for (const item of payload.jobs) {
-    if (!item || typeof item !== "object") continue;
-    const job = item as Record<string, unknown>;
-    const title = typeof job.title === "string" ? clean(job.title) : "";
-    const organization = typeof job.company_name === "string" ? clean(job.company_name) : "";
-    const location = typeof job.candidate_required_location === "string" ? clean(job.candidate_required_location) : "";
-    const description = typeof job.description === "string" ? clean(job.description) : "";
-    const url = typeof job.url === "string" ? publicUrl(job.url) : null;
-    if (!title || !url || !titleMatches(title, tokens) || !usRelevant(location, true)) continue;
-    jobs.push({
-      title,
-      organization: organization || null,
-      location: location || null,
-      url,
-      text: [title, organization, location, description].filter(Boolean).join("\n"),
-      body: description,
-    });
+  const seen = new Set<string>();
+  for (const block of page.body.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      addMonsterPosting(JSON.parse(block[1]) as unknown, jobs, seen);
+    } catch {
+      /* Skip a script block that is not JSON. */
+    }
+    if (jobs.length >= 8) return jobs;
+  }
+  for (const anchor of page.body.matchAll(/<a\b[^>]*href=["']([^"']*\/job-openings\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = anchor[1].startsWith("http") ? anchor[1] : `https://www.monster.com${anchor[1]}`;
+    const url = publicUrl(href);
+    const title = clean(anchor[2]);
+    if (!url || !title || title.length < 4 || title.length > 160 || seen.has(url)) continue;
+    seen.add(url);
+    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "" });
     if (jobs.length >= 8) break;
   }
   return jobs;
 }
 
-async function remoteOkJobs(query: string): Promise<RawListing[]> {
-  const tokens = queryTokens(query);
-  const page = await fetchText("https://remoteok.com/api");
-  if (!page.ok || blocked("remoteok.com", page.body)) return [];
-  let payload: unknown;
-  try {
-    payload = JSON.parse(page.body);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(payload)) return [];
+function decodeMarkup(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'");
+}
+
+async function sdBorJobs(query: string): Promise<RawListing[]> {
+  const page = await fetchText(
+    `https://yourfuture.sdbor.edu/postings/search.atom?query=${encodeURIComponent(query)}`,
+  );
+  if (!page.ok || blocked("yourfuture.sdbor.edu", page.body) || !page.body.includes("<entry")) return [];
   const jobs: RawListing[] = [];
-  for (const item of payload) {
-    if (!item || typeof item !== "object") continue;
-    const job = item as Record<string, unknown>;
-    const title = typeof job.position === "string" ? clean(job.position) : "";
-    const organization = typeof job.company === "string" ? clean(job.company) : "";
-    const location = typeof job.location === "string" ? clean(job.location) : "";
-    const description = typeof job.description === "string" ? clean(job.description) : "";
-    const url = typeof job.url === "string" ? publicUrl(job.url) : null;
-    if (!title || !url || !titleMatches(title, tokens) || !usRelevant(location, true)) continue;
+  for (const entry of page.body.split(/<entry\b/i).slice(1)) {
+    const title = clean(/<title>([\s\S]*?)<\/title>/i.exec(entry)?.[1] ?? "");
+    const href =
+      /<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["']/i.exec(entry)?.[1] ??
+      /<link[^>]*href=["']([^"']+)["'][^>]*rel=["']alternate["']/i.exec(entry)?.[1];
+    const url = href ? publicUrl(href) : null;
+    const organization = clean(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>/i.exec(entry)?.[1] ?? "");
+    const description = clean(decodeMarkup(/<content[^>]*>([\s\S]*?)<\/content>/i.exec(entry)?.[1] ?? ""));
+    if (!title || !url || !/yourfuture\.sdbor\.edu\/postings\/\d+/i.test(url)) continue;
     jobs.push({
       title,
       organization: organization || null,
-      location: location || "Remote",
+      location: "South Dakota",
       url,
-      text: [title, organization, location, description].filter(Boolean).join("\n"),
+      text: [title, organization, "South Dakota", description].filter(Boolean).join("\n"),
       body: description,
     });
     if (jobs.length >= 8) break;
@@ -360,10 +369,10 @@ export async function searchPortals(
   let fetched = 0;
   const fetchers: Record<PortalName, (query: string) => Promise<RawListing[]>> = {
     LinkedIn: linkedInJobs,
-    Remotive: remotiveJobs,
-    "Remote OK": remoteOkJobs,
+    "Monster.com": monsterJobs,
     "Y Combinator": yCombinatorJobs,
     HigherEdJobs: higherEdJobs,
+    SDBOR: sdBorJobs,
   };
   const found = await Promise.all(
     chosen.map(async (portal) => ({ portal, jobs: await fetchers[portal](query) })),
