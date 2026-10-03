@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { ApplicationStatus, JobSnapshot, TrackedApplication } from "@/lib/applications";
+
+const PAGE_SIZE = 5;
 
 function JobGroup({
   title,
@@ -14,6 +17,11 @@ function JobGroup({
   empty: string;
   onStatus: (job: JobSnapshot, status: ApplicationStatus) => void;
 }) {
+  const [page, setPage] = useState(0);
+  const pages = Math.ceil(jobs.length / PAGE_SIZE);
+  const current = pages === 0 ? 0 : Math.min(page, pages - 1);
+  const visible = jobs.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
+
   return (
     <section className="mt-8">
       <h2 className="flex items-baseline gap-2 font-heading text-xl font-semibold">
@@ -24,7 +32,7 @@ function JobGroup({
         <p className="mt-3 text-sm text-muted-foreground">{empty}</p>
       ) : (
         <ul className="mt-3 flex flex-col gap-3">
-          {jobs.map((job) => (
+          {visible.map((job) => (
             <li key={job.url} className="rounded-2xl border border-border bg-card p-4">
               <a
                 href={job.url}
@@ -61,6 +69,34 @@ function JobGroup({
           ))}
         </ul>
       )}
+      {pages > 1 ? (
+        <nav className="mt-4 flex flex-wrap items-center gap-2" aria-label={`${title} pages`}>
+          <Button type="button" size="sm" variant="secondary" disabled={current === 0} onClick={() => setPage(current - 1)}>
+            Previous
+          </Button>
+          {Array.from({ length: pages }, (_, index) => (
+            <Button
+              key={index}
+              type="button"
+              size="sm"
+              variant={index === current ? "default" : "secondary"}
+              aria-current={index === current ? "page" : undefined}
+              onClick={() => setPage(index)}
+            >
+              {index + 1}
+            </Button>
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={current === pages - 1}
+            onClick={() => setPage(current + 1)}
+          >
+            Next
+          </Button>
+        </nav>
+      ) : null}
     </section>
   );
 }
