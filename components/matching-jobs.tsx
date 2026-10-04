@@ -10,6 +10,17 @@ import { cn } from "@/lib/utils";
 
 const PORTALS = ["LinkedIn", "Monster.com", "Y Combinator", "HigherEdJobs", "SDBOR"] as const;
 
+function postedLabel(postedAt: number | null): string | null {
+  if (postedAt === null) return null;
+  const posted = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "America/Chicago",
+  }).format(postedAt);
+  return `Posted ${posted}`;
+}
+
 type Listing = {
   portal: string;
   title: string;
@@ -19,6 +30,7 @@ type Listing = {
   text: string;
   score: number | null;
   parts: { keywords: number; domain: number; technologies: number; experience: number } | null;
+  postedAt: number | null;
 };
 
 export function MatchingJobs({
@@ -35,6 +47,7 @@ export function MatchingJobs({
   const [listings, setListings] = useState<Listing[]>([]);
   const [empty, setEmpty] = useState<string[]>([]);
   const [noneQualified, setNoneQualified] = useState(false);
+  const [noneRecent, setNoneRecent] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +85,7 @@ export function MatchingJobs({
     setListings([]);
     setEmpty([]);
     setNoneQualified(false);
+    setNoneRecent(false);
     try {
       const response = await fetch("/api/portal-search", {
         method: "POST",
@@ -82,6 +96,7 @@ export function MatchingJobs({
         jobs?: Listing[];
         empty?: string[];
         noneQualified?: boolean;
+        noneRecent?: boolean;
         error?: string;
       };
       if (!response.ok) {
@@ -91,6 +106,7 @@ export function MatchingJobs({
       setListings(Array.isArray(data.jobs) ? data.jobs : []);
       setEmpty(Array.isArray(data.empty) ? data.empty : []);
       setNoneQualified(data.noneQualified === true);
+      setNoneRecent(data.noneRecent === true);
     } catch {
       setError("Search did not finish.");
     } finally {
@@ -180,6 +196,11 @@ export function MatchingJobs({
           {name} returned nothing.
         </p>
       ))}
+      {searched && noneRecent ? (
+        <p className="mt-4 text-sm text-muted-foreground">
+          None of the listings were posted in the last month.
+        </p>
+      ) : null}
       {searched && noneQualified ? (
         <p className="mt-4 text-sm text-muted-foreground">
           None of the listings scored 10 or higher without a citizenship or green-card requirement.
@@ -213,7 +234,7 @@ export function MatchingJobs({
                 </p>
               ) : null}
               <p className="mt-2 text-sm break-words text-muted-foreground">
-                {[job.organization, job.location, job.portal].filter(Boolean).join(" · ")}
+                {[postedLabel(job.postedAt), job.organization, job.location, job.portal].filter(Boolean).join(" · ")}
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Button

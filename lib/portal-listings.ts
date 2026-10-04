@@ -1,5 +1,6 @@
 import { htmlToText, isPrivateHost, looksLikeBlockedPage } from "@/lib/html-text";
 import { keepScoredListing } from "@/lib/job-filter";
+import { parsePostedAt, postedWithinMonth } from "@/lib/job-posted";
 import { scoreJobFit, type JobScoreParts } from "@/lib/job-score";
 import type { ParsedResume } from "@/lib/types";
 
@@ -13,12 +14,15 @@ export type PortalJob = {
   text: string;
   score: number | null;
   parts: JobScoreParts | null;
+  /** When the posting was published, in epoch milliseconds. */
+  postedAt: number | null;
 };
 
 export type PortalSearchResult = {
   jobs: PortalJob[];
   empty: string[];
   noneQualified: boolean;
+  noneRecent: boolean;
 };
 
 const ALLOWED = ["LinkedIn", "Monster.com", "Y Combinator", "HigherEdJobs", "SDBOR"] as const;
@@ -33,6 +37,7 @@ type RawListing = {
   text: string;
   /** Requirements and description used for scoring. Empty when the listing has none. */
   body: string;
+  postedAt: number | null;
 };
 
 const HEADERS = {
@@ -43,6 +48,10 @@ const HEADERS = {
 
 function clean(value: string): string {
   return htmlToText(value).replace(/\s+/g, " ").trim();
+}
+
+function newestFirst(jobs: RawListing[]): RawListing[] {
+  return jobs.sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0)).slice(0, 8);
 }
 
 function publicUrl(raw: string): string | null {
@@ -83,6 +92,11 @@ function parseLinkedInCards(html: string): RawListing[] {
     );
     const location = clean(/job-search-card__location[^>]*>([\s\S]*?)<\/span>/i.exec(block)?.[1] ?? "");
     const url = href ? publicUrl(href) : null;
+    const postedAt = parsePostedAt(
+      /job-search-card__listdate[^>]*datetime="([^"]+)"/i.exec(block)?.[1] ??
+        /<time[^>]*class="[^"]*job-search-card__listdate[^"]*"[^>]*>\s*([^<]+)/i.exec(block)?.[1] ??
+        "",
+    );
     if (!title || !url || !url.includes("linkedin.com/jobs/view/")) continue;
     const id = /urn:li:jobPosting:(\d+)/.exec(block)?.[1] ?? /jobs\/view\/[^"?]*-(\d+)/.exec(url)?.[1] ?? "";
     jobs.push({
@@ -92,17 +106,17 @@ function parseLinkedInCards(html: string): RawListing[] {
       url,
       text: id ? `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}` : "",
       body: "",
+      postedAt,
     });
-    if (jobs.length >= 8) break;
   }
-  return jobs;
+  return newestFirst(jobs);
 }
 
 async function linkedInJobs(query: string): Promise<RawListing[]> {
-  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent("United States")}&start=0`;
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent("United States")}&f_TPR=r2592000&start=0`;
   const page = await fetchText(url);
   if (!page.ok || !page.body.includes("base-search-card__title")) return [];
-  const cards = parseLinkedInCards(page.body);
+  const cards = parseLinkedInCards(page.body).filter((card) => card.postedAt !== null);
   await Promise.all(
     cards.map(async (card) => {
       if (!card.text.startsWith("http")) {
@@ -158,6 +172,7 @@ function addMonsterPosting(value: unknown, jobs: RawListing[], seen: Set<string>
       : "";
   const description = typeof record.description === "string" ? clean(record.description) : "";
   const location = monsterLocation(record.jobLocation);
+  const postedAt = typeof record.datePosted === "string" ? parsePostedAt(record.datePosted) : null;
   seen.add(url);
   jobs.push({
     title,
@@ -166,6 +181,7 @@ function addMonsterPosting(value: unknown, jobs: RawListing[], seen: Set<string>
     url,
     text: [title, organization, location, description].filter(Boolean).join("\n"),
     body: description,
+    postedAt,
   });
 }
 
@@ -182,7 +198,7 @@ async function monsterJobs(query: string): Promise<RawListing[]> {
     } catch {
       /* Skip a script block that is not JSON. */
     }
-    if (jobs.length >= 8) return jobs;
+    if (jobs.length >= 8) return newestFirst(jobs);
   }
   for (const anchor of page.body.matchAll(/<a\b[^>]*href=["']([^"']*\/job-openings\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     const href = anchor[1].startsWith("http") ? anchor[1] : `https://www.monster.com${anchor[1]}`;
@@ -190,10 +206,10 @@ async function monsterJobs(query: string): Promise<RawListing[]> {
     const title = clean(anchor[2]);
     if (!url || !title || title.length < 4 || title.length > 160 || seen.has(url)) continue;
     seen.add(url);
-    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "" });
+    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", postedAt: null });
     if (jobs.length >= 8) break;
   }
-  return jobs;
+  return newestFirst(jobs);
 }
 
 function decodeMarkup(value: string): string {
@@ -219,6 +235,7 @@ async function sdBorJobs(query: string): Promise<RawListing[]> {
     const url = href ? publicUrl(href) : null;
     const organization = clean(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>/i.exec(entry)?.[1] ?? "");
     const description = clean(decodeMarkup(/<content[^>]*>([\s\S]*?)<\/content>/i.exec(entry)?.[1] ?? ""));
+    const postedAt = parsePostedAt(/<published>([^<]+)<\/published>/i.exec(entry)?.[1] ?? "");
     if (!title || !url || !/yourfuture\.sdbor\.edu\/postings\/\d+/i.test(url)) continue;
     jobs.push({
       title,
@@ -227,10 +244,10 @@ async function sdBorJobs(query: string): Promise<RawListing[]> {
       url,
       text: [title, organization, "South Dakota", description].filter(Boolean).join("\n"),
       body: description,
+      postedAt,
     });
-    if (jobs.length >= 8) break;
   }
-  return jobs;
+  return newestFirst(jobs);
 }
 
 async function higherEdJobs(query: string): Promise<RawListing[]> {
@@ -252,10 +269,15 @@ async function higherEdJobs(query: string): Promise<RawListing[]> {
     const title = clean(anchor[2]);
     if (!url || !/higheredjobs\.com\/(?:faculty|admin|executive|details)\/details\.cfm/i.test(url)) continue;
     if (title.length < 8 || title.length > 160) continue;
-    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "" });
-    if (jobs.length >= 8) break;
+    const nearby = page.body.slice(anchor.index ?? 0, (anchor.index ?? 0) + 700);
+    const postedAt = parsePostedAt(
+      /(?:posted|date\s*posted)[^0-9]{0,24}(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i.exec(nearby)?.[1] ??
+        /datetime="(\d{4}-\d{2}-\d{2})/i.exec(nearby)?.[1] ??
+        "",
+    );
+    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", postedAt });
   }
-  return jobs;
+  return newestFirst(jobs);
 }
 
 const US_STATE =
@@ -325,11 +347,13 @@ async function yCombinatorJobs(query: string): Promise<RawListing[]> {
       url,
       text: [title, organization, location, blurb].filter(Boolean).join("\n"),
       body: "",
+      postedAt: null,
     });
     if (jobs.length >= 8) break;
   }
   await Promise.all(
     jobs.map(async (job) => {
+      if (job.postedAt === null) return;
       const detail = await fetchText(job.url);
       const props = detail.ok ? ycProps(detail.body) : null;
       const posting = props && typeof props.job === "object" && props.job ? (props.job as Record<string, unknown>) : null;
@@ -354,8 +378,9 @@ function scoreJob(job: RawListing, portal: string, resume: ParsedResume | null):
     url: job.url,
     text: job.body.trim() ? scoredText : "",
     score: fit?.score ?? null,
-    parts: fit?.parts ?? null,
-  };
+      parts: fit?.parts ?? null,
+      postedAt: job.postedAt,
+    };
 }
 
 export async function searchPortals(
@@ -367,6 +392,7 @@ export async function searchPortals(
   const empty: string[] = [];
   const jobs: PortalJob[] = [];
   let fetched = 0;
+  let recent = 0;
   const fetchers: Record<PortalName, (query: string) => Promise<RawListing[]>> = {
     LinkedIn: linkedInJobs,
     "Monster.com": monsterJobs,
@@ -384,11 +410,13 @@ export async function searchPortals(
     }
     fetched += item.jobs.length;
     for (const job of item.jobs) {
+      if (job.postedAt === null || !postedWithinMonth(job.postedAt)) continue;
+      recent += 1;
       const scored = scoreJob(job, item.portal, resume);
       if (!keepScoredListing(scored.score, job.text)) continue;
       jobs.push(scored);
     }
   }
-  jobs.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title));
-  return { jobs, empty, noneQualified: fetched > 0 && jobs.length === 0 };
+  jobs.sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0) || (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title));
+  return { jobs, empty, noneQualified: recent > 0 && jobs.length === 0, noneRecent: fetched > 0 && recent === 0 };
 }

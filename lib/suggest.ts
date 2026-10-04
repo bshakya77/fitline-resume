@@ -303,10 +303,11 @@ function factsFor(role: ResumeRole): WorkFact[] {
           statedResult: true,
         }))
       : works.slice(1).map((detail) => ({ text: closingSentence(detail, work), statedResult: false }));
-    const chosen = closings.length
-      ? closings
-      : [{ text: asSentence(`No separate result is stated for this ${role.title} work`), statedResult: false }];
-    for (const closing of chosen) {
+    if (closings.length === 0) {
+      facts.push({ work, closing: "", statedResult: false });
+      continue;
+    }
+    for (const closing of closings) {
       if (closing.text.toLowerCase().includes(work.toLowerCase().slice(0, 48))) continue;
       facts.push({ work, closing: closing.text, statedResult: closing.statedResult });
     }
@@ -374,12 +375,13 @@ export function craftBullet(
     for (const verb of verbOrder) {
       const first = opening(verb, skill.label, fact.work, pattern);
       pattern += 1;
-      const bullet = `${asSentence(first)} ${fact.closing}`;
+      const closing = fact.closing.trim();
+      const bullet = closing ? `${asSentence(first)} ${closing}` : asSentence(first);
       if (used.sentences.has(bullet)) continue;
       if (countMentions(bullet, skill.label) !== 1) continue;
-      if (sentenceCount(bullet) !== 2) continue;
+      if (sentenceCount(bullet) !== (closing ? 2 : 1)) continue;
       if (first.split(/\s+/).length < 8) continue;
-      if (tooSimilar(asSentence(first), fact.closing)) continue;
+      if (closing && tooSimilar(asSentence(first), closing)) continue;
       used.works.add(fact.work);
       used.closings.add(fact.closing);
       used.verbs.add(verb);
