@@ -1,4 +1,5 @@
 import { htmlToText, isPrivateHost, looksLikeBlockedPage } from "@/lib/html-text";
+import { excerptForCopy } from "@/lib/job-excerpt";
 import { keepScoredListing } from "@/lib/job-filter";
 import { parsePostedAt, postedWithinMonth } from "@/lib/job-posted";
 import { scoreJobFit, type JobScoreParts } from "@/lib/job-score";
@@ -12,6 +13,8 @@ export type PortalJob = {
   url: string;
   /** Posting text passed to the scorer, or empty when the listing has no description. */
   text: string;
+  /** Responsibilities, duties, requirements, and preferred qualifications for copying. */
+  excerpt: string;
   score: number | null;
   parts: JobScoreParts | null;
   /** When the posting was published, in epoch milliseconds. */
@@ -37,6 +40,7 @@ type RawListing = {
   text: string;
   /** Requirements and description used for scoring. Empty when the listing has none. */
   body: string;
+  excerpt: string;
   postedAt: number | null;
 };
 
@@ -48,6 +52,11 @@ const HEADERS = {
 
 function clean(value: string): string {
   return htmlToText(value).replace(/\s+/g, " ").trim();
+}
+
+function described(html: string): { body: string; excerpt: string } {
+  const body = clean(html);
+  return { body, excerpt: body ? excerptForCopy(html) : "" };
 }
 
 function newestFirst(jobs: RawListing[]): RawListing[] {
@@ -106,6 +115,7 @@ function parseLinkedInCards(html: string): RawListing[] {
       url,
       text: id ? `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}` : "",
       body: "",
+      excerpt: "",
       postedAt,
     });
   }
@@ -122,14 +132,16 @@ async function linkedInJobs(query: string): Promise<RawListing[]> {
       if (!card.text.startsWith("http")) {
         card.text = `${card.title}\n${card.organization ?? ""}\n${card.location ?? ""}`;
         card.body = "";
+        card.excerpt = "";
         return;
       }
       const detail = await fetchText(card.text);
       const marker = detail.body.indexOf("show-more-less-html__markup");
       const openEnd = marker >= 0 ? detail.body.indexOf(">", marker) : -1;
-      const description = openEnd >= 0 ? clean(detail.body.slice(openEnd + 1, openEnd + 1 + 12000)) : "";
-      card.body = description;
-      card.text = [card.title, card.organization, card.location, description].filter(Boolean).join("\n");
+      const posting = described(openEnd >= 0 ? detail.body.slice(openEnd + 1, openEnd + 1 + 12000) : "");
+      card.body = posting.body;
+      card.excerpt = posting.excerpt;
+      card.text = [card.title, card.organization, card.location, posting.body].filter(Boolean).join("\n");
     }),
   );
   return cards;
@@ -170,7 +182,7 @@ function addMonsterPosting(value: unknown, jobs: RawListing[], seen: Set<string>
     hiring && typeof hiring === "object" && typeof (hiring as Record<string, unknown>).name === "string"
       ? clean((hiring as Record<string, unknown>).name as string)
       : "";
-  const description = typeof record.description === "string" ? clean(record.description) : "";
+  const posting = typeof record.description === "string" ? described(record.description) : { body: "", excerpt: "" };
   const location = monsterLocation(record.jobLocation);
   const postedAt = typeof record.datePosted === "string" ? parsePostedAt(record.datePosted) : null;
   seen.add(url);
@@ -179,8 +191,9 @@ function addMonsterPosting(value: unknown, jobs: RawListing[], seen: Set<string>
     organization: organization || null,
     location,
     url,
-    text: [title, organization, location, description].filter(Boolean).join("\n"),
-    body: description,
+    text: [title, organization, location, posting.body].filter(Boolean).join("\n"),
+    body: posting.body,
+    excerpt: posting.excerpt,
     postedAt,
   });
 }
@@ -206,7 +219,7 @@ async function monsterJobs(query: string): Promise<RawListing[]> {
     const title = clean(anchor[2]);
     if (!url || !title || title.length < 4 || title.length > 160 || seen.has(url)) continue;
     seen.add(url);
-    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", postedAt: null });
+    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", excerpt: "", postedAt: null });
     if (jobs.length >= 8) break;
   }
   return newestFirst(jobs);
@@ -234,7 +247,7 @@ async function sdBorJobs(query: string): Promise<RawListing[]> {
       /<link[^>]*href=["']([^"']+)["'][^>]*rel=["']alternate["']/i.exec(entry)?.[1];
     const url = href ? publicUrl(href) : null;
     const organization = clean(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>/i.exec(entry)?.[1] ?? "");
-    const description = clean(decodeMarkup(/<content[^>]*>([\s\S]*?)<\/content>/i.exec(entry)?.[1] ?? ""));
+    const posting = described(decodeMarkup(/<content[^>]*>([\s\S]*?)<\/content>/i.exec(entry)?.[1] ?? ""));
     const postedAt = parsePostedAt(/<published>([^<]+)<\/published>/i.exec(entry)?.[1] ?? "");
     if (!title || !url || !/yourfuture\.sdbor\.edu\/postings\/\d+/i.test(url)) continue;
     jobs.push({
@@ -242,8 +255,9 @@ async function sdBorJobs(query: string): Promise<RawListing[]> {
       organization: organization || null,
       location: "South Dakota",
       url,
-      text: [title, organization, "South Dakota", description].filter(Boolean).join("\n"),
-      body: description,
+      text: [title, organization, "South Dakota", posting.body].filter(Boolean).join("\n"),
+      body: posting.body,
+      excerpt: posting.excerpt,
       postedAt,
     });
   }
@@ -275,7 +289,7 @@ async function higherEdJobs(query: string): Promise<RawListing[]> {
         /datetime="(\d{4}-\d{2}-\d{2})/i.exec(nearby)?.[1] ??
         "",
     );
-    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", postedAt });
+    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", excerpt: "", postedAt });
   }
   return newestFirst(jobs);
 }
@@ -347,6 +361,7 @@ async function yCombinatorJobs(query: string): Promise<RawListing[]> {
       url,
       text: [title, organization, location, blurb].filter(Boolean).join("\n"),
       body: "",
+      excerpt: "",
       postedAt: null,
     });
     if (jobs.length >= 8) break;
@@ -357,10 +372,11 @@ async function yCombinatorJobs(query: string): Promise<RawListing[]> {
       const detail = await fetchText(job.url);
       const props = detail.ok ? ycProps(detail.body) : null;
       const posting = props && typeof props.job === "object" && props.job ? (props.job as Record<string, unknown>) : null;
-      const description = typeof posting?.descriptionHtml === "string" ? clean(posting.descriptionHtml) : "";
-      if (description) {
-        job.body = description;
-        job.text = [job.text, description].filter(Boolean).join("\n");
+      const description = typeof posting?.descriptionHtml === "string" ? described(posting.descriptionHtml) : null;
+      if (description?.body) {
+        job.body = description.body;
+        job.excerpt = description.excerpt;
+        job.text = [job.text, description.body].filter(Boolean).join("\n");
       }
     }),
   );
@@ -368,19 +384,20 @@ async function yCombinatorJobs(query: string): Promise<RawListing[]> {
 }
 
 function scoreJob(job: RawListing, portal: string, resume: ParsedResume | null): PortalJob {
-  const scoredText = job.text.slice(0, 12000);
-  const fit = resume ? scoreJobFit(scoredText, resume) : null;
+  const posting = job.body.trim().slice(0, 12000);
+  const fit = resume && posting ? scoreJobFit(posting, resume) : null;
   return {
     portal,
     title: job.title,
     organization: job.organization,
     location: job.location,
     url: job.url,
-    text: job.body.trim() ? scoredText : "",
+    text: posting ? job.text.slice(0, 12000) : "",
+    excerpt: job.excerpt,
     score: fit?.score ?? null,
-      parts: fit?.parts ?? null,
-      postedAt: job.postedAt,
-    };
+    parts: fit?.parts ?? null,
+    postedAt: job.postedAt,
+  };
 }
 
 export async function searchPortals(

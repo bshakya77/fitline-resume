@@ -57,11 +57,10 @@ export function MatchPanel({
 
       {scored ? (
         <>
-          <dl className="grid grid-cols-2 gap-3 border-t border-border pt-4 sm:grid-cols-4">
+          <dl className="grid grid-cols-3 gap-3 border-t border-border pt-4">
             {(
               [
                 ["Keywords", parts.keywords],
-                ["Domain", parts.domain],
                 ["Technologies", parts.technologies],
                 ["Experience", parts.experience],
               ] as const

@@ -28,8 +28,9 @@ type Listing = {
   location: string | null;
   url: string;
   text: string;
+  excerpt: string;
   score: number | null;
-  parts: { keywords: number; domain: number; technologies: number; experience: number } | null;
+  parts: { keywords: number; technologies: number; experience: number } | null;
   postedAt: number | null;
 };
 
@@ -210,7 +211,7 @@ export function MatchingJobs({
         <ul className="mt-4 flex flex-col gap-3">
           {listings.map((job) => {
             const rowKey = `${job.portal}:${job.url}`;
-            const description = job.text?.trim() ?? "";
+            const description = job.excerpt?.trim() ?? "";
             const status = applications.find((item) => item.url === job.url)?.status ?? null;
             return (
             <li key={rowKey} className="rounded-2xl border border-border bg-card p-4">
@@ -228,7 +229,6 @@ export function MatchingJobs({
               {job.parts ? (
                 <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>Keywords {job.parts.keywords}</span>
-                  <span>Domain {job.parts.domain}</span>
                   <span>Technologies {job.parts.technologies}</span>
                   <span>Experience {job.parts.experience}</span>
                 </p>

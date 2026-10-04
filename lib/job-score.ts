@@ -1,10 +1,9 @@
 import { requirementTerms } from "@/lib/analyze";
-import { containsPhrase, findPostingSkills, skillAppearsIn, SKILLS } from "@/lib/skills";
+import { containsPhrase, findPostingSkills, skillAppearsIn } from "@/lib/skills";
 import type { ParsedResume } from "@/lib/types";
 
 export type JobScoreParts = {
   keywords: number;
-  domain: number;
   technologies: number;
   experience: number;
 };
@@ -45,21 +44,6 @@ const DOMAIN_IDS = new Set([
   "embeddings",
 ]);
 
-const EXTRA_DOMAIN = [
-  "research",
-  "healthcare",
-  "remote sensing",
-  "data science",
-  "robotics",
-  "medical imaging",
-  "geospatial",
-  "satellite imagery",
-  "earth observation",
-  "clinical",
-  "radiology",
-  "bioinformatics",
-];
-
 const MONTHS: Record<string, number> = {
   january: 0,
   february: 1,
@@ -80,21 +64,6 @@ function share(hit: number, total: number): number {
   return Math.round((100 * hit) / total);
 }
 
-function experienceBlob(resume: ParsedResume): string {
-  const parts: string[] = [];
-  const seen = new Set<string>();
-  for (const section of resume.sections) {
-    if (section.kind !== "experience") continue;
-    parts.push(section.title, section.text, ...section.bullets);
-    for (const roleId of section.roleIds) seen.add(roleId);
-  }
-  for (const role of resume.roles) {
-    if (!seen.has(role.id)) continue;
-    parts.push(role.title, role.orgPlain, ...role.bullets);
-  }
-  return parts.join("\n");
-}
-
 function keywordScore(posting: string, resumeText: string): number {
   const seen = new Set<string>();
   let total = 0;
@@ -111,30 +80,6 @@ function keywordScore(posting: string, resumeText: string): number {
     seen.add(word);
     total += 1;
     if (containsPhrase(resumeText, word)) hit += 1;
-  }
-  return share(hit, total);
-}
-
-function domainScore(posting: string, experience: string): number {
-  let total = 0;
-  let hit = 0;
-  const seen = new Set<string>();
-  for (const skill of SKILLS) {
-    if (!DOMAIN_IDS.has(skill.id)) continue;
-    const inPosting =
-      skill.aliases.some((alias) => containsPhrase(posting, alias)) ||
-      (skill.caseAliases?.some((alias) => containsPhrase(posting, alias)) ?? false);
-    if (!inPosting || seen.has(skill.label.toLowerCase())) continue;
-    seen.add(skill.label.toLowerCase());
-    total += 1;
-    const found = { id: skill.id, label: skill.label, category: skill.category, source: "catalog" as const };
-    if (skillAppearsIn(found, experience)) hit += 1;
-  }
-  for (const phrase of EXTRA_DOMAIN) {
-    if (seen.has(phrase) || !containsPhrase(posting, phrase)) continue;
-    seen.add(phrase);
-    total += 1;
-    if (containsPhrase(experience, phrase)) hit += 1;
   }
   return share(hit, total);
 }
@@ -207,13 +152,11 @@ function experienceScore(posting: string, resume: ParsedResume): number {
 }
 
 export function scoreJobFit(posting: string, resume: ParsedResume): JobFit {
-  const experience = experienceBlob(resume);
   const parts: JobScoreParts = {
     keywords: keywordScore(posting, resume.plainText),
-    domain: domainScore(posting, experience),
     technologies: technologyScore(posting, resume.plainText),
     experience: experienceScore(posting, resume),
   };
-  const score = Math.round((parts.keywords + parts.domain + parts.technologies + parts.experience) / 4);
+  const score = Math.round((parts.keywords + parts.technologies + parts.experience) / 3);
   return { score, parts };
 }

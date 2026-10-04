@@ -22,7 +22,7 @@ export type MatchResult = {
   missing: FoundSkill[];
   /** Filled by scoreJobFit. Null until that function scores the posting. */
   score: number | null;
-  parts: { keywords: number; domain: number; technologies: number; experience: number } | null;
+  parts: { keywords: number; technologies: number; experience: number } | null;
   keyword: ScorePart | null;
   experience: ExperienceScore | null;
   needsMoreJobText: boolean;
