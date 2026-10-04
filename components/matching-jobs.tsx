@@ -9,6 +9,13 @@ import type { ParsedResume } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const PORTALS = ["LinkedIn", "Monster.com", "Y Combinator", "HigherEdJobs", "SDBOR"] as const;
+const POSTED_WINDOWS = [1, 3, 5] as const;
+
+type PostedWindow = (typeof POSTED_WINDOWS)[number];
+
+function postedWindowLabel(months: PostedWindow): string {
+  return months === 1 ? "month" : `${months} months`;
+}
 
 function postedLabel(postedAt: number | null): string | null {
   if (postedAt === null) return null;
@@ -44,6 +51,8 @@ export function MatchingJobs({
   onStatus: (job: JobSnapshot, status: ApplicationStatus) => void;
 }) {
   const [keywords, setKeywords] = useState("");
+  const [postedWithinMonths, setPostedWithinMonths] = useState<PostedWindow>(1);
+  const [appliedWindow, setAppliedWindow] = useState<PostedWindow>(1);
   const [selected, setSelected] = useState<string[]>([]);
   const [listings, setListings] = useState<Listing[]>([]);
   const [empty, setEmpty] = useState<string[]>([]);
@@ -87,11 +96,17 @@ export function MatchingJobs({
     setEmpty([]);
     setNoneQualified(false);
     setNoneRecent(false);
+    setAppliedWindow(postedWithinMonths);
     try {
       const response = await fetch("/api/portal-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: keywords.trim(), portals: selected, resume }),
+        body: JSON.stringify({
+          query: keywords.trim(),
+          portals: selected,
+          resume,
+          postedWithin: postedWithinMonths,
+        }),
       });
       const data = (await response.json()) as {
         jobs?: Listing[];
@@ -141,6 +156,23 @@ export function MatchingJobs({
             Country
           </Label>
           <Input id="job-place" value="United States" readOnly className="min-h-11 rounded-xl bg-secondary px-2 text-center" />
+        </div>
+        <div className="w-[7.5rem] shrink-0">
+          <Label htmlFor="posted-within" className="sr-only">
+            Posted within
+          </Label>
+          <select
+            id="posted-within"
+            value={postedWithinMonths}
+            onChange={(event) => setPostedWithinMonths(Number(event.target.value) as PostedWindow)}
+            className="min-h-11 w-full rounded-xl border border-input bg-secondary px-2 text-center text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            {POSTED_WINDOWS.map((months) => (
+              <option key={months} value={months}>
+                {months === 1 ? "1 month" : `${months} months`}
+              </option>
+            ))}
+          </select>
         </div>
         <Button type="submit" className="shrink-0 px-4" disabled={keywords.trim().length < 2 || selected.length === 0}>
           Search
@@ -199,7 +231,7 @@ export function MatchingJobs({
       ))}
       {searched && noneRecent ? (
         <p className="mt-4 text-sm text-muted-foreground">
-          None of the listings were posted in the last month.
+          None of the listings were posted in the last {postedWindowLabel(appliedWindow)}.
         </p>
       ) : null}
       {searched && noneQualified ? (

@@ -37,6 +37,15 @@ export function parsePostedAt(value: string, now = Date.now()): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function postedWithinMonth(postedAt: number, now = Date.now()): boolean {
-  return postedAt <= now + DAY_MS && now - postedAt <= MONTH_MS;
+export const POSTED_WINDOWS = [1, 3, 5] as const;
+
+export type PostedWindow = (typeof POSTED_WINDOWS)[number];
+
+export function postedWindow(value: unknown): PostedWindow {
+  const months = Number(value);
+  return months === 3 || months === 5 ? months : 1;
+}
+
+export function postedWithin(postedAt: number, months: PostedWindow = 1, now = Date.now()): boolean {
+  return postedAt <= now + DAY_MS && now - postedAt <= months * MONTH_MS;
 }

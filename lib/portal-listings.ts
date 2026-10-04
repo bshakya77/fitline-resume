@@ -1,7 +1,7 @@
 import { htmlToText, isPrivateHost, looksLikeBlockedPage } from "@/lib/html-text";
 import { excerptForCopy } from "@/lib/job-excerpt";
 import { keepScoredListing } from "@/lib/job-filter";
-import { parsePostedAt, postedWithinMonth } from "@/lib/job-posted";
+import { parsePostedAt, postedWithin, type PostedWindow } from "@/lib/job-posted";
 import { scoreJobFit, type JobScoreParts } from "@/lib/job-score";
 import type { ParsedResume } from "@/lib/types";
 
@@ -122,8 +122,9 @@ function parseLinkedInCards(html: string): RawListing[] {
   return newestFirst(jobs);
 }
 
-async function linkedInJobs(query: string): Promise<RawListing[]> {
-  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent("United States")}&f_TPR=r2592000&start=0`;
+async function linkedInJobs(query: string, months: PostedWindow): Promise<RawListing[]> {
+  const seconds = months * 30 * 24 * 60 * 60;
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent("United States")}&f_TPR=r${seconds}&start=0`;
   const page = await fetchText(url);
   if (!page.ok || !page.body.includes("base-search-card__title")) return [];
   const cards = parseLinkedInCards(page.body).filter((card) => card.postedAt !== null);
@@ -404,6 +405,7 @@ export async function searchPortals(
   query: string,
   portals: string[],
   resume: ParsedResume | null,
+  months: PostedWindow = 1,
 ): Promise<PortalSearchResult> {
   const chosen = ALLOWED.filter((name) => portals.includes(name));
   const empty: string[] = [];
@@ -411,7 +413,7 @@ export async function searchPortals(
   let fetched = 0;
   let recent = 0;
   const fetchers: Record<PortalName, (query: string) => Promise<RawListing[]>> = {
-    LinkedIn: linkedInJobs,
+    LinkedIn: (keyword) => linkedInJobs(keyword, months),
     "Monster.com": monsterJobs,
     "Y Combinator": yCombinatorJobs,
     HigherEdJobs: higherEdJobs,
@@ -427,7 +429,7 @@ export async function searchPortals(
     }
     fetched += item.jobs.length;
     for (const job of item.jobs) {
-      if (job.postedAt === null || !postedWithinMonth(job.postedAt)) continue;
+      if (job.postedAt === null || !postedWithin(job.postedAt, months)) continue;
       recent += 1;
       const scored = scoreJob(job, item.portal, resume);
       if (!keepScoredListing(scored.score, job.text)) continue;
