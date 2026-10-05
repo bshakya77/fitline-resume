@@ -1,5 +1,5 @@
+import type { JobScoreParts } from "@/lib/job-score";
 import { findPostingSkills, skillAppearsIn } from "@/lib/skills";
-import { suggestMissing, type SuggestionGroup } from "@/lib/suggest";
 import type { FoundSkill, ParsedResume } from "@/lib/types";
 
 export type ScorePart = {
@@ -22,11 +22,10 @@ export type MatchResult = {
   missing: FoundSkill[];
   /** Filled by scoreJobFit. Null until that function scores the posting. */
   score: number | null;
-  parts: { keywords: number; technologies: number; experience: number } | null;
+  parts: JobScoreParts | null;
   keyword: ScorePart | null;
   experience: ExperienceScore | null;
   needsMoreJobText: boolean;
-  suggestions: SuggestionGroup[];
 };
 
 const REQUIREMENT_STOP = new Set([
@@ -70,7 +69,6 @@ export function analyzeResume(jobText: string, resume: ParsedResume): MatchResul
       keyword: null,
       experience: null,
       needsMoreJobText: true,
-      suggestions: [],
     };
   }
 
@@ -83,6 +81,5 @@ export function analyzeResume(jobText: string, resume: ParsedResume): MatchResul
     keyword: null,
     experience: null,
     needsMoreJobText: false,
-    suggestions: suggestMissing(missing, resume.roles),
   };
 }

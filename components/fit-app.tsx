@@ -6,7 +6,7 @@ import { MatchPanel } from "@/components/match-panel";
 import { MatchingJobs } from "@/components/matching-jobs";
 import { ResumePanel } from "@/components/resume-panel";
 import { SiteHeader } from "@/components/site-header";
-import { Suggestions } from "@/components/suggestions";
+import { LearningRoadmap } from "@/components/learning-roadmap";
 import { useApplications } from "@/components/use-applications";
 import type { MatchResult } from "@/lib/analyze";
 import type { ParsedResume } from "@/lib/types";
@@ -170,7 +170,7 @@ export function FitApp() {
           </div>
           {match && match.score !== null ? (
             <div className="min-w-0 min-[800px]:col-span-2">
-              <Suggestions groups={match.suggestions} covered={match.missing.length === 0} />
+              <LearningRoadmap skills={match.missing} />
             </div>
           ) : null}
         </section>

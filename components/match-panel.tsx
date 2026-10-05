@@ -2,6 +2,7 @@
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { MatchResult } from "@/lib/analyze";
+import { educationText, experienceText } from "@/lib/job-score";
 
 export function MatchPanel({
   match,
@@ -57,19 +58,21 @@ export function MatchPanel({
 
       {scored ? (
         <>
-          <dl className="grid grid-cols-3 gap-3 border-t border-border pt-4">
-            {(
-              [
-                ["Keywords", parts.keywords],
-                ["Technologies", parts.technologies],
-                ["Experience", parts.experience],
-              ] as const
-            ).map(([label, value]) => (
-              <div key={label} className="min-w-0">
-                <dt className="text-sm text-muted-foreground">{label}</dt>
-                <dd className="font-heading text-3xl leading-none">{value}</dd>
-              </div>
-            ))}
+          <dl className="grid gap-2 border-t border-border pt-4 sm:grid-cols-3">
+            <div className="min-w-0">
+              <dt className="sr-only">Keywords</dt>
+              <dd className="text-sm font-medium">
+                Keywords: {parts.keywordsHit}/{parts.keywordsTotal}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="sr-only">Education</dt>
+              <dd className="text-sm font-medium">Education: {educationText(parts.education)}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="sr-only">Experience</dt>
+              <dd className="text-sm font-medium">Experience: {experienceText(parts.experienceYears)}</dd>
+            </div>
           </dl>
 
           <div className="border-t border-border pt-4">

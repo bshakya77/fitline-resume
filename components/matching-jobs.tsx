@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ApplicationStatus, JobSnapshot, TrackedApplication } from "@/lib/applications";
+import { educationText, experienceText, type JobScoreParts } from "@/lib/job-score";
 import type { ParsedResume } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +38,7 @@ type Listing = {
   text: string;
   excerpt: string;
   score: number | null;
-  parts: { keywords: number; technologies: number; experience: number } | null;
+  parts: JobScoreParts | null;
   postedAt: number | null;
 };
 
@@ -260,9 +261,9 @@ export function MatchingJobs({
               </div>
               {job.parts ? (
                 <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span>Keywords {job.parts.keywords}</span>
-                  <span>Technologies {job.parts.technologies}</span>
-                  <span>Experience {job.parts.experience}</span>
+                  <span>Keywords: {job.parts.keywordsHit}/{job.parts.keywordsTotal}</span>
+                  <span>Education: {educationText(job.parts.education)}</span>
+                  <span>Experience: {experienceText(job.parts.experienceYears)}</span>
                 </p>
               ) : null}
               <p className="mt-2 text-sm break-words text-muted-foreground">
