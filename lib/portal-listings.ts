@@ -265,34 +265,99 @@ async function sdBorJobs(query: string): Promise<RawListing[]> {
   return newestFirst(jobs);
 }
 
+function higherEdJobUrl(href: string): string | null {
+  try {
+    const url = publicUrl(new URL(href.replace(/&amp;/g, "&"), "https://www.higheredjobs.com/search/advanced_action.cfm").toString());
+    if (!url) return null;
+    const parsed = new URL(url);
+    if (!/(?:^|\.)higheredjobs\.com$/i.test(parsed.hostname)) return null;
+    if (!/\/details\.cfm$/i.test(parsed.pathname)) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function readPostedAt(source: string): number | null {
+  const text = clean(source);
+  const relative = /\b(?:posted\s+)?(\d+\s+(?:minute|hour|day|week|month)s?\s+ago)\b/i.exec(text);
+  if (relative) {
+    const parsed = parsePostedAt(relative[1]);
+    if (parsed) return parsed;
+  }
+  const stamp =
+    /\b\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?\b/.exec(text)?.[0] ??
+    /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.exec(text)?.[0] ??
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b/i.exec(text)?.[0];
+  if (stamp) {
+    const parsed = parsePostedAt(stamp);
+    if (parsed) return parsed;
+  }
+  const clause = /\bposted\b[^.\n]{0,48}/i.exec(text)?.[0] ?? "";
+  return clause ? parsePostedAt(clause.replace(/^posted\s+/i, "")) : null;
+}
+
+function unescapeMarkup(value: string): string {
+  return value
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "")
+    .replace(/\\"/g, '"')
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#x2f;/gi, "/")
+    .replace(/&#(\d+);/g, (_, digits: string) => String.fromCharCode(Number(digits)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, digits: string) => String.fromCharCode(parseInt(digits, 16)));
+}
+
+async function readHigherEdPosting(job: RawListing): Promise<void> {
+  const page = await fetchText(job.url);
+  if (!page.ok || blocked("www.higheredjobs.com", page.body)) return;
+  const postedAt = readPostedAt(/"datePosted"\s*:\s*"([^"]+)"/i.exec(page.body)?.[1] ?? "");
+  if (postedAt) job.postedAt = postedAt;
+  const encoded = /"description"\s*:\s*"([\s\S]*?)"\s*,/i.exec(page.body)?.[1];
+  if (!encoded) return;
+  const posting = described(unescapeMarkup(encoded));
+  if (!posting.body) return;
+  job.body = posting.body;
+  job.excerpt = posting.excerpt;
+  job.text = [job.title, job.organization, job.location, posting.body].filter(Boolean).join("\n");
+}
+
 async function higherEdJobs(query: string): Promise<RawListing[]> {
   const page = await fetchText(
     `https://www.higheredjobs.com/search/advanced_action.cfm?Keyword=${encodeURIComponent(query)}`,
   );
   if (!page.ok || blocked("www.higheredjobs.com", page.body)) return [];
   const jobs: RawListing[] = [];
+  const seen = new Set<string>();
   for (const anchor of page.body.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
     const href = /href=["']([^"']+)["']/i.exec(anchor[1])?.[1];
-    let url: string | null = null;
-    try {
-      url = href
-        ? publicUrl(new URL(href.replace(/&amp;/g, "&"), "https://www.higheredjobs.com").toString())
-        : null;
-    } catch {
-      url = null;
-    }
+    const url = href ? higherEdJobUrl(href) : null;
     const title = clean(anchor[2]);
-    if (!url || !/higheredjobs\.com\/(?:faculty|admin|executive|details)\/details\.cfm/i.test(url)) continue;
-    if (title.length < 8 || title.length > 160) continue;
-    const nearby = page.body.slice(anchor.index ?? 0, (anchor.index ?? 0) + 700);
-    const postedAt = parsePostedAt(
-      /(?:posted|date\s*posted)[^0-9]{0,24}(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i.exec(nearby)?.[1] ??
-        /datetime="(\d{4}-\d{2}-\d{2})/i.exec(nearby)?.[1] ??
-        "",
-    );
-    jobs.push({ title, organization: null, location: "United States", url, text: title, body: "", excerpt: "", postedAt });
+    if (!url || title.length < 2 || title.length > 300) continue;
+    const code = /JobCode=(\d+)/i.exec(url)?.[1] ?? url;
+    if (seen.has(code)) continue;
+    seen.add(code);
+    const nearby = page.body.slice(anchor.index ?? 0, (anchor.index ?? 0) + 900);
+    const tail = page.body.slice((anchor.index ?? 0) + anchor[0].length, (anchor.index ?? 0) + anchor[0].length + 350);
+    const organization = clean(/^(?:\s|<br\s*\/?>)*([^<]{2,160})/i.exec(tail)?.[1] ?? "");
+    jobs.push({
+      title,
+      organization: organization && !/^posted\b/i.test(organization) ? organization : null,
+      location: "United States",
+      url,
+      text: title,
+      body: "",
+      excerpt: "",
+      postedAt: readPostedAt(nearby),
+    });
   }
-  return newestFirst(jobs);
+  const listed = newestFirst(jobs);
+  await Promise.all(listed.map((job) => readHigherEdPosting(job)));
+  return listed;
 }
 
 const US_STATE =
